@@ -78,7 +78,7 @@ module Xmldsig
         when "http://www.w3.org/2000/09/xmldsig#sha1"
           Digest::SHA1
         else
-          Digest::SHA2
+          Digest::SHA1
       end
     end
 
