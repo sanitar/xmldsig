@@ -1,34 +1,25 @@
 module Xmldsig
   class Signature
-    attr_accessor :signature, :errors
+    attr_accessor :signature
 
-    def initialize(signature)
+    def initialize(signature, id_attr = nil, referenced_documents = {})
       @signature = signature
-      @errors    = []
+      @id_attr = id_attr
+      @referenced_documents = referenced_documents
     end
 
-    def digest_value
-      Base64.decode64 signed_info.at_xpath("descendant::ds:DigestValue", NAMESPACES).content
-    end
-
-    def document
-      signature.document
-    end
-
-    def referenced_node
-      if reference_uri && reference_uri != ""
-        document.dup.at_xpath("//*[@ID='#{reference_uri[1..-1]}']")
-      else
-        document.root
+    def references
+      @references ||= signature.xpath("descendant::ds:Reference", NAMESPACES).map do |node|
+        Reference.new(node, @id_attr, @referenced_documents)
       end
     end
 
-    def reference_uri
-      signature.at_xpath("descendant::ds:Reference", NAMESPACES).get_attribute("URI")
+    def errors
+      references.flat_map(&:errors) + @errors
     end
 
     def sign(private_key = nil, &block)
-      self.digest_value    = calculate_digest_value
+      references.each { |reference| reference.sign }
       self.signature_value = calculate_signature_value(private_key, &block)
     end
 
@@ -40,26 +31,44 @@ module Xmldsig
       Base64.decode64 signature.at_xpath("descendant::ds:SignatureValue", NAMESPACES).content
     end
 
-    def valid?(certificate = nil, &block)
+    def valid?(certificate = nil, schema = nil, &block)
       @errors = []
-      validate_digest_value
+      references.each { |r| r.errors = [] }
+      validate_schema(schema)
+      validate_digest_values
       validate_signature_value(certificate, &block)
-      @errors.empty?
+      errors.empty?
+    end
+
+    def signed?
+      !unsigned?
+    end
+
+    def unsigned?
+      self.signature_value.to_s.empty?
     end
 
     private
-
-    def calculate_digest_value
-      node = transforms.apply(referenced_node)
-      digest_method.digest node
-    end
 
     def canonicalization_method
       signed_info.at_xpath("descendant::ds:CanonicalizationMethod", NAMESPACES).get_attribute("Algorithm")
     end
 
     def canonicalized_signed_info
-      Canonicalizer.new(signed_info, canonicalization_method).canonicalize
+      Canonicalizer.new(
+        signed_info,
+        canonicalization_method,
+        inclusive_namespaces_for_canonicalization
+      ).canonicalize
+    end
+
+    def inclusive_namespaces_for_canonicalization
+      namespaces_node = signed_info.at_xpath(
+        'descendant::ds:CanonicalizationMethod/ec:InclusiveNamespaces',
+        NAMESPACES
+      )
+      return unless namespaces_node && namespaces_node.get_attribute('PrefixList')
+      namespaces_node.get_attribute('PrefixList').split(/\W+/)
     end
 
     def calculate_signature_value(private_key, &block)
@@ -94,6 +103,10 @@ module Xmldsig
     def signature_method
       algorithm = signature_algorithm && signature_algorithm =~ /sha(.*?)$/i && $1.to_i
       case algorithm
+        when 512
+          OpenSSL::Digest::SHA512
+        when 384
+          OpenSSL::Digest::SHA384
         when 256 then
           OpenSSL::Digest::SHA256
         else
@@ -103,17 +116,17 @@ module Xmldsig
 
     def signature_value=(signature_value)
       signature.at_xpath("descendant::ds:SignatureValue", NAMESPACES).content =
-          Base64.encode64(signature_value).chomp
+          Base64.strict_encode64(signature_value).chomp
     end
 
-    def transforms
-      Transforms.new(signature.xpath("descendant::ds:Transform", NAMESPACES))
+    def validate_schema(schema)
+      doc = Nokogiri::XML::Document.parse(signature.canonicalize)
+      errors = Nokogiri::XML::Schema.new(schema || Xmldsig::XSD_FILE).validate(doc)
+      raise Xmldsig::SchemaError.new(errors.first.message) if errors.any?
     end
 
-    def validate_digest_value
-      unless digest_value == calculate_digest_value
-        errors << :digest_value
-      end
+    def validate_digest_values
+      references.each(&:validate_digest_value)
     end
 
     def validate_signature_value(certificate)
@@ -124,7 +137,7 @@ module Xmldsig
       end
 
       unless signature_valid
-        errors << :signature
+        @errors << :signature
       end
     end
   end

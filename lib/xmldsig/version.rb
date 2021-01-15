@@ -1,3 +1,3 @@
 module Xmldsig
-  VERSION = "0.0.3"
+  VERSION = '0.6.6'
 end

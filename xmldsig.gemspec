@@ -12,8 +12,11 @@ Gem::Specification.new do |gem|
   gem.executables   = gem.files.grep(%r{^bin/}).map{ |f| File.basename(f) }
   gem.test_files    = gem.files.grep(%r{^(test|spec|features)/})
   gem.name          = "xmldsig"
+  gem.license       = 'MIT'
   gem.require_paths = ["lib"]
   gem.version       = Xmldsig::VERSION
+  
+  gem.required_ruby_version = '>= 1.9.2'
 
-  gem.add_dependency("nokogiri")
+  gem.add_dependency("nokogiri", '>= 1.6.8', '< 2.0.0')
 end

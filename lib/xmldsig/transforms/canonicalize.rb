@@ -2,7 +2,7 @@ module Xmldsig
   class Transforms < Array
     class Canonicalize < Transform
       def transform
-        self.node = Canonicalizer.new(node, algorithm, inclusive_namespaces).canonicalize
+        self.node = Canonicalizer.new(node, algorithm, inclusive_namespaces, with_comments).canonicalize
         node
       end
 
@@ -17,7 +17,7 @@ module Xmldsig
         if inclusive_namespaces && inclusive_namespaces.has_attribute?("PrefixList")
           inclusive_namespaces.get_attribute("PrefixList").to_s.split(" ")
         else
-          []
+          nil
         end
       end
     end
